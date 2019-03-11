@@ -15,7 +15,7 @@ L.tileLayer('https://a.tiles.mapbox.com/v4/xxxx.json', {
 // Getting JSON data
 
 var xhr = new XMLHttpRequest();
-var url = "https://bnjmn.io/viz/denkmalschutzobjekte/denkmalschutzobjekt.json";
+var url = "https://xy.z/denkmalschutzobjekt.json";
 
 xhr.onreadystatechange = function() {
     if (xhr.readyState == 4 && xhr.status == 200) {
