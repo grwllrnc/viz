@@ -1,0 +1,139 @@
+---
+title: "Gebäude nach Bauperiode und Bezirk"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r message=FALSE, warning=FALSE, paged.print=TRUE}
+
+# Libraries
+library(tidyverse)
+library(sf)
+library(plotly)
+
+# set ggplot2 theme
+theme_set(theme_light())
+
+```
+
+### Dataset
+###### Gebäude nach institutionellen Gliederungen, Gebäudekategorie und Bauperiode
+Data source: Bundesamt für Statistik, GeoLion https://www.bfs.admin.ch/bfs/de/home/statistiken/kataloge-datenbanken/daten.assetdetail.6266134.html.
+Shapefile of the municipalities of the canton Zurich is available at https://geolion.zh.ch.
+```{r}
+
+# Data file
+buildings <- read_csv("../../data/Schweiz/Gebäude.csv", skip = 2, local = locale(encoding = "Latin1"))
+
+# Shapefile
+zh_mapdata <- read_sf("../../data/Swiss map/Kanton Zürich/Gemeindegrenzen/UP_GEMEINDEN_SEEN_F.shp",
+                      stringsAsFactors = FALSE,
+                      quiet = TRUE)
+
+```
+
+### Data transformation
+```{r}
+
+# Tidying
+buildings_processed <- buildings %>%
+  gather(Jahr, Anzahl, -c(Ort, Gebäudekategorie, Bauperiode), convert = TRUE) %>%
+  mutate(Ort = str_remove(Ort, "\\.+\\d+\\s"))
+
+# lumping "Oberstammheim", "Unterstammheim" and "Waltalingen" together into "Stammheim"
+stammheim <- buildings_processed %>%
+  filter(Ort %in% c("Oberstammheim", "Unterstammheim", "Waltalingen")) %>%
+  group_by(Gebäudekategorie, Bauperiode, Jahr) %>%
+  summarise(Anzahl = sum(Anzahl)) %>%
+  ungroup() %>%
+  mutate(Ort = "Stammheim") %>%
+  select(Ort, Gebäudekategorie, Bauperiode, Jahr, Anzahl)
+
+# Computing total edifices by municipality and year
+municipalities <- buildings_processed %>%
+  bind_rows(stammheim) %>%
+  group_by(Ort, Jahr) %>%
+  mutate(Total_pro_Ort_Jahr = sum(Anzahl, na.rm = TRUE)) %>%
+  ungroup()
+
+# Joining data with geolocation data by name of municipality (canton ZH)
+municipalities_zh <- zh_mapdata %>%
+  filter(ART_TEXT == "Gemeinde") %>%
+  left_join(municipalities, by = c("GEMEINDENA" = "Ort")) %>%
+  rename(Ort = GEMEINDENA)
+
+```
+
+### What is the share of edifices by construction period, building categorie and year?
+```{r}
+
+share_by_category <- municipalities_zh %>%
+  filter(Jahr == 2017,
+         Bauperiode == "Vor 1919") %>%
+  group_by(Ort) %>%
+  summarise(Anteil = sum(Anzahl, na.rm = TRUE) / unique(Total_pro_Ort_Jahr)) %>%
+  st_cast("MULTIPOLYGON")
+
+```
+
+### Plot style
+```{r}
+
+# Plot layout, style and properties
+
+# Fonts
+t <- list(family = "Gravitas One, sans-serif",
+          size = 14,
+          color = 'black')
+
+# Margins
+m <- list(t = 0)
+
+```
+
+### Plotting
+```{r}
+
+# Color palette
+RdPu <- RColorBrewer::brewer.pal(9, "RdPu")
+
+# ggplot
+p <- share_by_category %>%
+  ggplot(aes(fill = Anteil,
+             text = paste("<b>", Ort, "</b>", "\n", "Anteil: ", round(Anteil*100, 1), "%"))) +
+  geom_sf(color = 'gray', size = .2) +
+  scale_fill_gradientn(colours = RdPu,
+                      labels = scales::percent_format(accuracy = 1),
+                      name = "Anteil") +
+  theme(panel.grid = element_line(color = "transparent"),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(),
+        axis.title = element_blank())
+
+# ggplotly
+p %>%
+  ggplotly(tooltip = "text", width = 960, height = 600) %>%
+  style(hoverlabel = list(bgcolor = "white"), hoveron = "fill") %>%
+  layout(font = t,
+         margin = m,
+         annotations = list(
+           list(x = 0.86,
+                y = 0,
+                text = paste0("Datenquelle: ",
+                             "<a href='https://www.bfs.admin.ch/bfs/de/home/statistiken/kataloge-datenbanken/daten.assetdetail.6266134.html' target='_blank'>",
+                             "Bundesamt für Statistik",
+                             "</a>"), 
+                font = list(size = 10),
+                showarrow = F, 
+                xref = "paper", 
+                yref = "paper",
+                xanchor = "left",
+                yanchor = "bottom")
+           )
+ )
+
+```
